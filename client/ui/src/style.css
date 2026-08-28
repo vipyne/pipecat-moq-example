@@ -1,0 +1,25 @@
+@import "@pipecat-ai/voice-ui-kit/styles.css";
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+.notice {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  text-align: center;
+  background: #1f2937;
+  color: #e5e7eb;
+  border-top: 1px solid #374151;
+}
+
+.notice.warn {
+  background: #7f1d1d;
+}

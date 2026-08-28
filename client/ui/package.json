@@ -1,0 +1,32 @@
+{
+  "name": "pipecat-moq-example-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pipecat console UI using Media over QUIC (@pipecat-ai/moq-transport)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react-swc": "^4.3.1",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.16"
+  },
+  "overrides": {
+    "lodash": "^4.18.0",
+    "picomatch": "^4.0.4",
+    "esbuild": "^0.28.1"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^1.13.0",
+    "@pipecat-ai/client-react": "^1.8.2",
+    "@pipecat-ai/moq-transport": "^0.1.1",
+    "@pipecat-ai/voice-ui-kit": "^0.13.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

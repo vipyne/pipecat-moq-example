@@ -1,0 +1,12 @@
+# Proxy + built UI in one container. Listens on http://localhost:7861.
+#
+# Browsers only expose the microphone and WebTransport in a secure context, so
+# anything other than localhost needs HTTPS: put any TLS-terminating reverse
+# proxy (Caddy, nginx, Traefik, a cloud load balancer, ...) in front of 7861.
+services:
+  proxy:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "7861:7861"
