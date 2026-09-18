@@ -30,7 +30,8 @@ Two details are specific to running MoQ on Pipecat Cloud:
   for anything else it just starts the bot and returns a session id. So the client side has to mint the
   namespace, pass it to the bot in the request `body` (`body.moq = {namespace, relayUrl, clientId, botId}`)
   and hand the UI the same `moq` connection block the Pipecat dev runner would return. The proxy is
-  a small FastAPI shim that does exactly that and serves the UI.
+  a small FastAPI shim that does exactly that and serves the UI. The `relayUrl` in that body is the
+  **client's** `MOQ_RELAY_URL` — picks the relay for both sides; the bot's `MOQ_RELAY_URL` is a fallback.
 - **Why the bot waits before its intro.** RTVI `client-ready` reaches the bot as soon as the browser's
   relay session is up — which can be before the browser has subscribed to the bot's audio track. MoQ is
   live media with no replay, so audio published in that window is lost. `bot.py` waits for a subscriber
@@ -74,7 +75,7 @@ uv tool install "pipecat-ai[cli]"
 pipecat cloud auth login
 
 cd server
-pipecat cloud secrets set pipecat-moq-example-secrets --file .env   # must include MOQ_RELAY_URL
+pipecat cloud secrets set pipecat-moq-example-secrets --file .env   # MOQ_RELAY_URL is a fallback only
 pipecat cloud deploy                                                # builds ./Dockerfile in the cloud
 ```
 
@@ -94,7 +95,8 @@ You should see `MoQ: connected to relay …` followed (once a browser joins that
 ## Run the client
 
 The client is `proxy.py` (the `/start` shim) plus the built UI in `ui/`. It needs your Pipecat Cloud
-**public** API key and the same relay URL as the bot.
+**public** API key and the relay URL (passed to the bot per session, so it decides where both
+sides meet).
 
 ```bash
 cd client
@@ -131,7 +133,7 @@ Tests: `uv run pytest` (Pipecat Cloud is mocked).
 | Variable | Purpose |
 |---|---|
 | `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | AI services |
-| `MOQ_RELAY_URL` | Relay the bot dials on Pipecat Cloud (client mode), e.g. `https://cdn.moq.dev/anon` |
+| `MOQ_RELAY_URL` | Fallback only — `body.moq.relayUrl` from the proxy takes precedence when present |
 | `MOQ_CONNECTION_TIMEOUT` | Seconds to wait for the browser's broadcast at the relay (default 60) |
 | `MOQ_SUBSCRIBER_TIMEOUT` | Seconds to wait for a subscriber on the bot's audio before speaking (default 15) |
 | `PIPECAT_LOG_LEVEL` | `DEBUG` shows the transport's connect/publish lines |
@@ -142,7 +144,7 @@ Tests: `uv run pytest` (Pipecat Cloud is mocked).
 |---|---|
 | `PCC_AGENT_NAME` | Must match `agent_name` in `server/pcc-deploy.toml` |
 | `PCC_PUBLIC_API_KEY` | Pipecat Cloud public API key (used only by the proxy, never sent to the browser) |
-| `MOQ_RELAY_URL` | Must match the bot's, so both sides meet at the same relay |
+| `MOQ_RELAY_URL` | Relay both sides dial — forwarded to the bot per session (`body.moq.relayUrl`) |
 | `ACCESS_KEY` | Optional shared passcode; when set, open the UI with `?key=…` once |
 | `PCC_START_URL`, `PORT` | Optional overrides |
 
