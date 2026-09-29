@@ -111,6 +111,10 @@ def _moq_params() -> MOQParams:
         # How long to wait for the browser's broadcast to show up at the relay
         # before giving up. Generous, to cover Pipecat Cloud cold starts.
         connection_timeout=_env_float("MOQ_CONNECTION_TIMEOUT", 60.0),
+        # Pace TTS writes to near-real-time. IETF (draft-16) relays carry no
+        # frame timestamps; receivers stamp arrival time, so frames must
+        # arrive at presentation pace to play back intelligibly.
+        audio_out_max_buffer_ms=int(_env_float("MOQ_AUDIO_OUT_MAX_BUFFER_MS", 40)),
     )
 
 

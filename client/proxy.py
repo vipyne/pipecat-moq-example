@@ -71,8 +71,17 @@ class Settings:
         self.agent_name = os.getenv("PCC_AGENT_NAME", "")
         self.public_api_key = os.getenv("PCC_PUBLIC_API_KEY", "")
         self.moq_relay_url = os.getenv("MOQ_RELAY_URL", "")
+        # Relay allowlist: MOQ_RELAY_URL (default) plus optional comma-separated
+        # MOQ_RELAY_URLS; deduped, order preserved. Callers pick per session via
+        # /start `relayUrl`.
+        extra = [u.strip() for u in os.getenv("MOQ_RELAY_URLS", "").split(",") if u.strip()]
+        self.relays = list(dict.fromkeys([self.moq_relay_url, *extra]))
         self.start_url = os.getenv("PCC_START_URL") or f"{PCC_API_BASE}/{self.agent_name}/start"
         self.access_key = os.getenv("ACCESS_KEY") or None
+        # SPIKE (throwaway): when set, /start returns a canned moq config on this
+        # fixed namespace and does NOT start a Pipecat Cloud bot — a local
+        # publisher owns `<namespace>/response`. For the moqt-16 interop spike.
+        self.spike_namespace = os.getenv("SPIKE_NAMESPACE") or None
 
     def validate(self) -> None:
         missing = [
@@ -86,15 +95,15 @@ class Settings:
         ]
         if missing:
             raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-        relay_path = urlparse(self.moq_relay_url).path.strip("/")
-        if not relay_path:
-            # Both the bot and the browser dial exactly this URL; the path is the
-            # relay's root for publishing/subscribing (e.g. `/anon` on moq-relay).
-            # Without it the two sides land in different roots and never meet.
-            raise RuntimeError(
-                f"MOQ_RELAY_URL={self.moq_relay_url!r} has no path. Include the relay's "
-                "publish root, e.g. https://cdn.moq.dev/anon"
-            )
+        for relay in self.relays:
+            if not urlparse(relay).path.strip("/"):
+                # Both the bot and the browser dial exactly this URL; the path is the
+                # relay's root for publishing/subscribing (e.g. `/anon` on moq-relay).
+                # Without it the two sides land in different roots and never meet.
+                raise RuntimeError(
+                    f"Relay URL {relay!r} has no path. Include the relay's "
+                    "publish root, e.g. https://cdn.moq.dev/anon"
+                )
 
 
 async def pcc_start(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
@@ -125,9 +134,15 @@ def build_start_payload(request_data: dict[str, Any], settings: Settings) -> tup
 
     if transport == "moq":
         namespace = request_data.get("namespace") or _new_session_namespace()
+        relay_url = request_data.get("relayUrl") or settings.moq_relay_url
+        if relay_url not in settings.relays:
+            raise HTTPException(
+                status_code=400,
+                detail="relayUrl not in configured relay list",
+            )
         body["moq"] = {
             "namespace": namespace,
-            "relayUrl": settings.moq_relay_url,
+            "relayUrl": relay_url,
             "clientId": MOQ_CLIENT_ID,
             "botId": MOQ_BOT_ID,
         }
@@ -140,10 +155,10 @@ def build_start_payload(request_data: dict[str, Any], settings: Settings) -> tup
     )
 
 
-def build_moq_client_config(namespace: str, settings: Settings) -> dict[str, Any]:
+def build_moq_client_config(namespace: str, relay_url: str) -> dict[str, Any]:
     """The ``moq`` block the prebuilt UI / MoqTransport expects from /start."""
     return {
-        "relayUrl": settings.moq_relay_url,
+        "relayUrl": relay_url,
         "certHash": None,  # public TLS on the relay; nothing to pin
         "serve": False,
         "namespace": namespace,
@@ -230,6 +245,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "ok": True,
             "agent": settings.agent_name,
             "relay": settings.moq_relay_url,
+            "relays": settings.relays,
             "ui": "fork" if UI_DIST.is_dir() else "prebuilt",
         }
 
@@ -242,19 +258,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not isinstance(request_data, dict):
             raise HTTPException(status_code=400, detail="JSON body must be an object")
 
+        # SPIKE mode: skip Pipecat Cloud; point the browser at a fixed namespace
+        # served by a local publisher. Honors the caller's relay (allowlisted).
+        if settings.spike_namespace:
+            relay_url = request_data.get("relayUrl") or settings.moq_relay_url
+            if relay_url not in settings.relays:
+                raise HTTPException(status_code=400, detail="relayUrl not in configured relay list")
+            logger.info(
+                "SPIKE start: namespace={} relay={}", settings.spike_namespace, relay_url
+            )
+            return {
+                "sessionId": "spike",
+                "moq": build_moq_client_config(settings.spike_namespace, relay_url),
+            }
+
         transport, payload = build_start_payload(request_data, settings)
         pcc = await pcc_start(settings, payload)
 
-        namespace = payload["body"]["moq"]["namespace"]
+        moq = payload["body"]["moq"]
         result: dict[str, Any] = {
             "sessionId": pcc.get("sessionId"),
-            "moq": build_moq_client_config(namespace, settings),
+            "moq": build_moq_client_config(moq["namespace"], moq["relayUrl"]),
         }
         logger.info(
-            "start transport={} sessionId={} namespace={}",
+            "start transport={} sessionId={} namespace={} relay={}",
             transport,
             result["sessionId"],
-            namespace,
+            moq["namespace"],
+            moq["relayUrl"],
         )
         return result
 
@@ -287,7 +318,7 @@ if __name__ == "__main__":
     _settings.validate()
     port = int(os.getenv("PORT", "7861"))
     logger.info(f"Proxying /start -> {_settings.start_url}")
-    logger.info(f"MoQ relay: {_settings.moq_relay_url}")
+    logger.info(f"MoQ relays: {', '.join(_settings.relays)} (default: {_settings.moq_relay_url})")
     logger.info(f"Access key: {'set' if _settings.access_key else 'NOT SET (open access)'}")
     logger.info(f"Open http://localhost:{port}/client/")
     uvicorn.run(create_app(_settings), host="0.0.0.0", port=port)

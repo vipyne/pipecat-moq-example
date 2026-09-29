@@ -12,8 +12,18 @@ def settings(monkeypatch):
     monkeypatch.setenv("PCC_AGENT_NAME", "my-agent")
     monkeypatch.setenv("PCC_PUBLIC_API_KEY", "pk_test")
     monkeypatch.setenv("MOQ_RELAY_URL", "https://relay.example.com/anon")
+    monkeypatch.delenv("MOQ_RELAY_URLS", raising=False)
     monkeypatch.delenv("PCC_START_URL", raising=False)
     monkeypatch.delenv("ACCESS_KEY", raising=False)
+    return Settings()
+
+
+@pytest.fixture
+def multi_relay(settings, monkeypatch):
+    monkeypatch.setenv(
+        "MOQ_RELAY_URLS",
+        "https://backup.example.com/anon, https://relay.example.com/anon",
+    )
     return Settings()
 
 
@@ -95,6 +105,50 @@ def test_validate_accepts_relay_url_with_path(monkeypatch):
     Settings().validate()
 
 
+# --- relay allowlist -------------------------------------------------------
+
+
+def test_relays_defaults_to_single_env_relay(settings):
+    assert settings.relays == ["https://relay.example.com/anon"]
+
+
+def test_relays_dedupes_and_keeps_default_first(multi_relay):
+    assert multi_relay.relays == [
+        "https://relay.example.com/anon",
+        "https://backup.example.com/anon",
+    ]
+
+
+def test_validate_rejects_extra_relay_without_path(monkeypatch):
+    monkeypatch.setenv("PCC_AGENT_NAME", "a")
+    monkeypatch.setenv("PCC_PUBLIC_API_KEY", "pk")
+    monkeypatch.setenv("MOQ_RELAY_URL", "https://relay.example.com/anon")
+    monkeypatch.setenv("MOQ_RELAY_URLS", "https://backup.example.com")
+    with pytest.raises(RuntimeError, match="has no path"):
+        Settings().validate()
+
+
+def test_validate_accepts_extra_relays_with_paths(multi_relay):
+    multi_relay.validate()
+
+
+def test_payload_honors_caller_relay_from_allowlist(multi_relay):
+    _, payload = build_start_payload(
+        {"transport": "moq", "relayUrl": "https://backup.example.com/anon"},
+        multi_relay,
+    )
+    assert payload["body"]["moq"]["relayUrl"] == "https://backup.example.com/anon"
+
+
+def test_payload_rejects_relay_off_allowlist(multi_relay):
+    with pytest.raises(Exception) as exc:
+        build_start_payload(
+            {"transport": "moq", "relayUrl": "https://evil.example.com/anon"},
+            multi_relay,
+        )
+    assert getattr(exc.value, "status_code", None) == 400
+
+
 # --- endpoints -------------------------------------------------------------
 
 
@@ -125,11 +179,41 @@ def test_start_endpoint_rejects_other_transports(settings, pcc):
     assert pcc == []  # never reached Pipecat Cloud
 
 
+def test_start_endpoint_uses_caller_relay_on_both_sides(multi_relay, pcc):
+    client = TestClient(create_app(multi_relay))
+    r = client.post(
+        "/start",
+        json={"transport": "moq", "relayUrl": "https://backup.example.com/anon"},
+    )
+    assert r.status_code == 200
+    assert pcc[0]["body"]["moq"]["relayUrl"] == "https://backup.example.com/anon"
+    assert r.json()["moq"]["relayUrl"] == "https://backup.example.com/anon"
+
+
+def test_start_endpoint_rejects_relay_off_allowlist(multi_relay, pcc):
+    client = TestClient(create_app(multi_relay))
+    r = client.post(
+        "/start",
+        json={"transport": "moq", "relayUrl": "https://evil.example.com/anon"},
+    )
+    assert r.status_code == 400
+    assert pcc == []  # never reached Pipecat Cloud
+
+
 def test_healthz(settings):
     client = TestClient(create_app(settings))
     r = client.get("/healthz")
     assert r.status_code == 200 and r.json()["ok"] is True
     assert r.json()["relay"] == "https://relay.example.com/anon"  # shown in the UI header
+    assert r.json()["relays"] == ["https://relay.example.com/anon"]
+
+
+def test_healthz_lists_all_relays(multi_relay):
+    client = TestClient(create_app(multi_relay))
+    assert client.get("/healthz").json()["relays"] == [
+        "https://relay.example.com/anon",
+        "https://backup.example.com/anon",
+    ]
 
 
 def test_root_redirects_to_client(settings, pcc):

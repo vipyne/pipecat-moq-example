@@ -30,8 +30,9 @@ Two details are specific to running MoQ on Pipecat Cloud:
   for anything else it just starts the bot and returns a session id. So the client side has to mint the
   namespace, pass it to the bot in the request `body` (`body.moq = {namespace, relayUrl, clientId, botId}`)
   and hand the UI the same `moq` connection block the Pipecat dev runner would return. The proxy is
-  a small FastAPI shim that does exactly that and serves the UI. The `relayUrl` in that body is the
-  **client's** `MOQ_RELAY_URL` — picks the relay for both sides; the bot's `MOQ_RELAY_URL` is a fallback.
+  a small FastAPI shim that does exactly that and serves the UI. The `relayUrl` in that body picks the
+  relay for both sides — the client's `MOQ_RELAY_URL` by default, or a per-session choice from the
+  `MOQ_RELAY_URLS` allowlist; the bot's `MOQ_RELAY_URL` is a fallback.
 - **Why the bot waits before its intro.** RTVI `client-ready` reaches the bot as soon as the browser's
   relay session is up — which can be before the browser has subscribed to the bot's audio track. MoQ is
   live media with no replay, so audio published in that window is lost. `bot.py` waits for a subscriber
@@ -114,6 +115,11 @@ Open http://localhost:7861 and click Connect (`GET /healthz` is the health check
 For UI development: run `uv run proxy.py` in one terminal and `npm run dev` in `ui/` in another.
 Vite serves the UI with hot reload and proxies `/start` to the proxy on :7861.
 
+**Choosing a relay per session.** Set `MOQ_RELAY_URLS` in `client/.env` to a comma-separated list of
+additional relays. The UI shows a relay dropdown (when more than one is configured) and honors
+`?relay=<url>` in the link; the choice applies on the next connect and is forwarded to the bot, so
+both sides always dial the same relay. `/start` rejects any `relayUrl` not on the list.
+
 **Gating a public demo.** Set `ACCESS_KEY` in `client/.env` and share the UI as
 `https://<host>/client/?key=<ACCESS_KEY>`. The proxy exchanges the key for a cookie and strips it from
 the URL; every route except `/healthz` requires it. It keeps strangers from burning your Pipecat Cloud
@@ -144,7 +150,8 @@ Tests: `uv run pytest` (Pipecat Cloud is mocked).
 |---|---|
 | `PCC_AGENT_NAME` | Must match `agent_name` in `server/pcc-deploy.toml` |
 | `PCC_PUBLIC_API_KEY` | Pipecat Cloud public API key (used only by the proxy, never sent to the browser) |
-| `MOQ_RELAY_URL` | Relay both sides dial — forwarded to the bot per session (`body.moq.relayUrl`) |
+| `MOQ_RELAY_URL` | Default relay both sides dial — forwarded to the bot per session (`body.moq.relayUrl`) |
+| `MOQ_RELAY_URLS` | Optional comma-separated extra relays, selectable per session (UI dropdown or `?relay=<url>`) |
 | `ACCESS_KEY` | Optional shared passcode; when set, open the UI with `?key=…` once |
 | `PCC_START_URL`, `PORT` | Optional overrides |
 

@@ -9,6 +9,12 @@ ENV UV_LINK_MODE=copy
 # Uncomment if you wish to print a summary of the features available in the base image
 # ENV PCC_LOG_FEATURES_SUMMARY=true
 
+# git: needed to install the temporary `pipecat-ai @ git+https://…@vp-moq-ffi-0.4-port`
+# dependency (the ported moq transport). Drop this once that lands on PyPI.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
